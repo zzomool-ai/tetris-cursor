@@ -4,28 +4,11 @@ const COLS = 10;
 /** 게임 보드 세로 칸 수 */
 const ROWS = 20;
 
-/** 한 칸의 픽셀 크기 */
-const BLOCK_SIZE = 30;
+/** 자동 낙하 간격 (ms) */
+const DROP_INTERVAL = 800;
 
-/** 레벨당 속도 증가량 (ms) */
-const LEVEL_SPEED_STEP = 80;
-
-/** 기본 낙하 간격 (ms) */
-const BASE_DROP_INTERVAL = 900;
-
-/** 줄 삭제 점수표 */
+/** 줄 삭제 점수표 (삭제 줄 수 인덱스) */
 const LINE_SCORES = [0, 100, 300, 500, 800];
-
-/** 테트로미노 색상 */
-const COLORS = {
-  I: '#22d3ee',
-  O: '#facc15',
-  T: '#c084fc',
-  S: '#4ade80',
-  Z: '#f87171',
-  J: '#60a5fa',
-  L: '#fb923c',
-};
 
 /** 테트로미노 회전 상태 정의 */
 const SHAPES = {
@@ -74,31 +57,26 @@ const SHAPES = {
 };
 
 /** DOM 요소 */
-const canvas = document.getElementById('game-canvas');
-const nextCanvas = document.getElementById('next-canvas');
+const boardEl = document.getElementById('game-board');
 const scoreEl = document.getElementById('score');
-const levelEl = document.getElementById('level');
-const linesEl = document.getElementById('lines');
-const overlay = document.getElementById('overlay');
-const overlayTitle = document.getElementById('overlay-title');
-const overlayMessage = document.getElementById('overlay-message');
 const startBtn = document.getElementById('start-btn');
 const restartBtn = document.getElementById('restart-btn');
+const overlayEl = document.getElementById('overlay');
+const overlayTitleEl = document.getElementById('overlay-title');
+const overlayMessageEl = document.getElementById('overlay-message');
 
-/** 2D 렌더링 컨텍스트 */
-const ctx = canvas.getContext('2d');
-const nextCtx = nextCanvas.getContext('2d');
+/** 보드 칸 DOM 요소 목록 */
+const cellElements = [];
+
+/** 자동 낙하 타이머 ID */
+let dropTimerId = null;
 
 /** 게임 상태 */
 const state = {
   board: createBoard(),
   current: null,
-  next: null,
   score: 0,
-  level: 1,
-  lines: 0,
-  status: 'menu',
-  lastDrop: 0,
+  status: 'idle',
   animationId: null,
 };
 
@@ -117,16 +95,19 @@ function createBoard() {
 function createPiece() {
   const types = Object.keys(SHAPES);
   const type = types[Math.floor(Math.random() * types.length)];
+  const matrix = SHAPES[type][0];
+  const spawnX = Math.floor((COLS - matrix[0].length) / 2);
+
   return {
     type,
     rotation: 0,
-    x: Math.floor(COLS / 2) - 1,
+    x: spawnX,
     y: 0,
   };
 }
 
 /**
- * 현재 회전 상태의 블록 행렬을 반환한다.
+ * 피스의 블록 행렬을 반환한다.
  * @param {{ type: string, rotation: number }} piece - 피스 객체
  * @returns {number[][]} 블록 행렬
  */
@@ -135,30 +116,32 @@ function getMatrix(piece) {
 }
 
 /**
- * 피스가 보드 안에 유효한 위치인지 검사한다.
- * @param {{ type: string, rotation: number, x: number, y: number }} piece - 검사할 피스
- * @param {number} offsetX - X 이동량
- * @param {number} offsetY - Y 이동량
- * @param {number} [rotation] - 회전 상태
- * @returns {boolean} 유효하면 true
+ * 피스가 이동 가능한지 충돌 판정한다.
+ * @param {{ type: string, x: number, y: number }} piece - 피스 객체
+ * @param {number} dx - X 이동량
+ * @param {number} dy - Y 이동량
+ * @param {number[][]} matrix - 블록 행렬
+ * @returns {boolean} 이동 가능하면 true
  */
-function isValidPosition(piece, offsetX, offsetY, rotation = piece.rotation) {
-  const matrix = SHAPES[piece.type][rotation];
-
+function canMove(piece, dx, dy, matrix) {
   for (let row = 0; row < matrix.length; row += 1) {
     for (let col = 0; col < matrix[row].length; col += 1) {
       if (!matrix[row][col]) {
         continue;
       }
 
-      const x = piece.x + col + offsetX;
-      const y = piece.y + row + offsetY;
+      const newRow = piece.y + row + dy;
+      const newCol = piece.x + col + dx;
 
-      if (x < 0 || x >= COLS || y >= ROWS) {
+      if (newCol < 0 || newCol >= COLS || newRow >= ROWS) {
         return false;
       }
 
-      if (y >= 0 && state.board[y][x]) {
+      if (newRow < 0) {
+        continue;
+      }
+
+      if (state.board[newRow][newCol]) {
         return false;
       }
     }
@@ -168,10 +151,98 @@ function isValidPosition(piece, offsetX, offsetY, rotation = piece.rotation) {
 }
 
 /**
- * 현재 피스를 보드에 고정한다.
+ * 자동 낙하 타이머를 시작한다. 기존 타이머가 있으면 먼저 해제한다.
  */
-function lockPiece() {
-  const matrix = getMatrix(state.current);
+function startDropTimer() {
+  stopDropTimer();
+  dropTimerId = setInterval(() => {
+    if (state.status === 'playing') {
+      moveDown();
+    }
+  }, DROP_INTERVAL);
+}
+
+/**
+ * 자동 낙하 타이머를 해제한다.
+ */
+function stopDropTimer() {
+  if (dropTimerId !== null) {
+    clearInterval(dropTimerId);
+    dropTimerId = null;
+  }
+}
+
+/**
+ * 보드 격자 DOM을 최초 1회 생성한다.
+ */
+function buildBoardGrid() {
+  boardEl.innerHTML = '';
+  cellElements.length = 0;
+
+  for (let row = 0; row < ROWS; row += 1) {
+    for (let col = 0; col < COLS; col += 1) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.row = String(row);
+      cell.dataset.col = String(col);
+      boardEl.appendChild(cell);
+      cellElements.push(cell);
+    }
+  }
+}
+
+/**
+ * 행·열 좌표에 해당하는 칸 DOM을 반환한다.
+ * @param {number} row - 행
+ * @param {number} col - 열
+ * @returns {HTMLElement | undefined} 칸 요소
+ */
+function getCellElement(row, col) {
+  if (row < 0 || row >= ROWS || col < 0 || col >= COLS) {
+    return undefined;
+  }
+
+  return cellElements[row * COLS + col];
+}
+
+/**
+ * 칸의 표시 상태를 초기화한다.
+ * @param {HTMLElement} cell - 칸 요소
+ */
+function clearCell(cell) {
+  cell.className = 'cell';
+  cell.removeAttribute('data-type');
+}
+
+/**
+ * 고정된 보드 상태를 CSS Grid 칸에 렌더링한다.
+ */
+function renderBoard() {
+  for (let row = 0; row < ROWS; row += 1) {
+    for (let col = 0; col < COLS; col += 1) {
+      const cell = getCellElement(row, col);
+      const type = state.board[row][col];
+
+      clearCell(cell);
+
+      if (type) {
+        cell.classList.add(`cell--${type}`);
+        cell.dataset.type = type;
+      }
+    }
+  }
+}
+
+/**
+ * 현재 떨어지는 블록을 보드 위에 그린다.
+ * @param {{ type: string, x: number, y: number }} piece - 피스 객체
+ */
+function drawPiece(piece) {
+  if (!piece) {
+    return;
+  }
+
+  const matrix = getMatrix(piece);
 
   for (let row = 0; row < matrix.length; row += 1) {
     for (let col = 0; col < matrix[row].length; col += 1) {
@@ -179,21 +250,39 @@ function lockPiece() {
         continue;
       }
 
-      const x = state.current.x + col;
-      const y = state.current.y + row;
+      const boardRow = piece.y + row;
+      const boardCol = piece.x + col;
+      const cell = getCellElement(boardRow, boardCol);
 
-      if (y < 0) {
-        endGame();
-        return;
+      if (!cell) {
+        continue;
       }
 
-      state.board[y][x] = state.current.type;
+      clearCell(cell);
+      cell.classList.add(`cell--${piece.type}`, 'cell--piece');
+      cell.dataset.type = piece.type;
     }
   }
 }
 
 /**
+ * 보드와 현재 블록을 함께 화면에 반영한다.
+ */
+function render() {
+  renderBoard();
+  drawPiece(state.current);
+}
+
+/**
+ * 점수 UI를 갱신한다.
+ */
+function updateScore() {
+  scoreEl.textContent = String(state.score);
+}
+
+/**
  * 완성된 줄을 삭제하고 점수를 갱신한다.
+ * @returns {number} 삭제된 줄 수
  */
 function clearLines() {
   let cleared = 0;
@@ -208,250 +297,184 @@ function clearLines() {
   }
 
   if (cleared > 0) {
-    state.lines += cleared;
-    state.score += LINE_SCORES[cleared] * state.level;
-    state.level = Math.floor(state.lines / 10) + 1;
-    updateStats();
+    state.score += LINE_SCORES[cleared];
+    updateScore();
+  }
+
+  return cleared;
+}
+
+/**
+ * 게임 오버 오버레이를 표시한다.
+ */
+function showGameOverOverlay() {
+  overlayTitleEl.textContent = '게임 오버';
+  overlayMessageEl.textContent = `최종 점수: ${state.score}`;
+  overlayEl.classList.remove('hidden');
+}
+
+/**
+ * 게임 오버 오버레이를 숨긴다.
+ */
+function hideOverlay() {
+  overlayEl.classList.add('hidden');
+}
+
+/**
+ * 현재 블록을 보드에 고정한다.
+ */
+function lockPiece() {
+  const piece = state.current;
+  const matrix = getMatrix(piece);
+
+  for (let row = 0; row < matrix.length; row += 1) {
+    for (let col = 0; col < matrix[row].length; col += 1) {
+      if (!matrix[row][col]) {
+        continue;
+      }
+
+      const boardRow = piece.y + row;
+      const boardCol = piece.x + col;
+
+      if (boardRow < 0) {
+        endGame();
+        return;
+      }
+
+      state.board[boardRow][boardCol] = piece.type;
+    }
   }
 }
 
 /**
- * 다음 피스를 현재 피스로 교체한다.
+ * 착지 후 줄 삭제와 새 블록 스폰을 처리한다.
+ */
+function settleAfterLock() {
+  if (state.status !== 'playing') {
+    return;
+  }
+
+  clearLines();
+  spawnPiece();
+}
+
+/**
+ * 새 블록을 스폰한다. 스폰 불가 시 게임 오버 처리한다.
  */
 function spawnPiece() {
-  state.current = state.next ?? createPiece();
-  state.next = createPiece();
+  state.current = createPiece();
+  const matrix = getMatrix(state.current);
 
-  if (!isValidPosition(state.current, 0, 0)) {
+  if (!canMove(state.current, 0, 0, matrix)) {
     endGame();
   }
 }
 
 /**
- * 피스를 아래로 한 칸 이동한다.
- * @returns {boolean} 이동 성공 여부
- */
-function moveDown() {
-  if (!isValidPosition(state.current, 0, 1)) {
-    lockPiece();
-    clearLines();
-    spawnPiece();
-    return false;
-  }
-
-  state.current.y += 1;
-  return true;
-}
-
-/**
  * 피스를 좌우로 이동한다.
  * @param {number} direction - 이동 방향 (-1: 왼쪽, 1: 오른쪽)
+ * @returns {boolean} 이동에 성공했으면 true
  */
 function moveHorizontal(direction) {
-  if (isValidPosition(state.current, direction, 0)) {
-    state.current.x += direction;
+  const piece = state.current;
+  const matrix = getMatrix(piece);
+
+  if (canMove(piece, direction, 0, matrix)) {
+    piece.x += direction;
+    return true;
   }
+
+  return false;
 }
 
 /**
- * 피스를 회전한다.
+ * 피스를 90도 회전한다. 충돌 시 회전을 취소한다.
+ * @returns {boolean} 회전에 성공했으면 true
  */
 function rotatePiece() {
-  const nextRotation = (state.current.rotation + 1) % 4;
+  const piece = state.current;
+  const nextRotation = (piece.rotation + 1) % 4;
+  const nextMatrix = SHAPES[piece.type][nextRotation];
 
-  if (isValidPosition(state.current, 0, 0, nextRotation)) {
-    state.current.rotation = nextRotation;
-    return;
+  if (canMove(piece, 0, 0, nextMatrix)) {
+    piece.rotation = nextRotation;
+    return true;
   }
 
-  // 벽 차기: 좁은 공간에서 회전 허용
-  const kicks = [-1, 1, -2, 2];
-  for (const kick of kicks) {
-    if (isValidPosition(state.current, kick, 0, nextRotation)) {
-      state.current.x += kick;
-      state.current.rotation = nextRotation;
-      return;
-    }
-  }
+  return false;
 }
 
 /**
- * 피스를 즉시 바닥까지 떨어뜨린다.
+ * 피스를 바닥까지 즉시 떨어뜨린다.
  */
 function hardDrop() {
   while (moveDown()) {
-    state.score += 2;
-  }
-  updateStats();
-}
-
-/**
- * 현재 레벨의 낙하 간격을 반환한다.
- * @returns {number} 낙하 간격(ms)
- */
-function getDropInterval() {
-  return Math.max(120, BASE_DROP_INTERVAL - (state.level - 1) * LEVEL_SPEED_STEP);
-}
-
-/**
- * 점수 UI를 갱신한다.
- */
-function updateStats() {
-  scoreEl.textContent = String(state.score);
-  levelEl.textContent = String(state.level);
-  linesEl.textContent = String(state.lines);
-}
-
-/**
- * 단일 칸을 캔버스에 그린다.
- * @param {CanvasRenderingContext2D} context - 캔버스 컨텍스트
- * @param {number} x - X 좌표(칸)
- * @param {number} y - Y 좌표(칸)
- * @param {string} type - 블록 타입
- * @param {number} [cellSize=BLOCK_SIZE] - 칸 크기
- */
-function drawCell(context, x, y, type, cellSize = BLOCK_SIZE) {
-  const color = COLORS[type];
-  const px = x * cellSize;
-  const py = y * cellSize;
-
-  context.fillStyle = color;
-  context.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
-
-  context.fillStyle = 'rgba(255, 255, 255, 0.25)';
-  context.fillRect(px + 2, py + 2, cellSize - 8, 4);
-}
-
-/**
- * 게임 보드를 렌더링한다.
- */
-function drawBoard() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  for (let row = 0; row < ROWS; row += 1) {
-    for (let col = 0; col < COLS; col += 1) {
-      if (state.board[row][col]) {
-        drawCell(ctx, col, row, state.board[row][col]);
-      }
-    }
-  }
-
-  if (state.current && (state.status === 'playing' || state.status === 'paused')) {
-    const matrix = getMatrix(state.current);
-    for (let row = 0; row < matrix.length; row += 1) {
-      for (let col = 0; col < matrix[row].length; col += 1) {
-        if (matrix[row][col]) {
-          drawCell(ctx, state.current.x + col, state.current.y + row, state.current.type);
-        }
-      }
-    }
+    // 충돌할 때까지 반복
   }
 }
 
 /**
- * 다음 블록 미리보기를 렌더링한다.
+ * 피스를 아래로 한 칸 이동한다. 막히면 고정 후 줄 삭제·스폰을 진행한다.
+ * @returns {boolean} 이동에 성공했으면 true
  */
-function drawNextPiece() {
-  nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+function moveDown() {
+  const piece = state.current;
+  const matrix = getMatrix(piece);
 
-  if (!state.next) {
-    return;
+  if (canMove(piece, 0, 1, matrix)) {
+    piece.y += 1;
+    return true;
   }
 
-  const matrix = getMatrix(state.next);
-  const cellSize = 24;
-  const offsetX = Math.floor((nextCanvas.width / cellSize - matrix[0].length) / 2);
-  const offsetY = Math.floor((nextCanvas.height / cellSize - matrix.length) / 2);
-
-  for (let row = 0; row < matrix.length; row += 1) {
-    for (let col = 0; col < matrix[row].length; col += 1) {
-      if (matrix[row][col]) {
-        drawCell(nextCtx, offsetX + col, offsetY + row, state.next.type, cellSize);
-      }
-    }
-  }
+  lockPiece();
+  settleAfterLock();
+  return false;
 }
 
 /**
- * 게임 루프를 실행한다.
- * @param {number} timestamp - requestAnimationFrame 타임스탬프
+ * 게임 오버 상태로 전환한다.
  */
-function gameLoop(timestamp) {
-  if (state.status === 'playing') {
-    if (timestamp - state.lastDrop >= getDropInterval()) {
-      moveDown();
-      state.lastDrop = timestamp;
-    }
-  }
+function endGame() {
+  stopDropTimer();
+  state.status = 'gameover';
+  state.current = null;
+  showGameOverOverlay();
+}
 
-  drawBoard();
-  drawNextPiece();
+/**
+ * 화면 렌더링 루프를 실행한다.
+ */
+function gameLoop() {
+  render();
   state.animationId = requestAnimationFrame(gameLoop);
 }
 
 /**
- * 오버레이 UI를 표시한다.
- * @param {string} title - 제목
- * @param {string} message - 안내 문구
- * @param {'start' | 'restart'} mode - 버튼 모드
+ * 게임 상태를 초기화한다.
  */
-function showOverlay(title, message, mode) {
-  overlay.classList.remove('hidden');
-  overlayTitle.textContent = title;
-  overlayMessage.textContent = message;
-  startBtn.classList.toggle('hidden', mode !== 'start');
-  restartBtn.classList.toggle('hidden', mode !== 'restart');
-}
-
-/**
- * 오버레이 UI를 숨긴다.
- */
-function hideOverlay() {
-  overlay.classList.add('hidden');
-}
-
-/**
- * 게임 상태를 초기화하고 시작한다.
- */
-function startGame() {
+function resetGame() {
+  stopDropTimer();
   state.board = createBoard();
-  state.current = null;
-  state.next = createPiece();
+  state.current = createPiece();
   state.score = 0;
-  state.level = 1;
-  state.lines = 0;
-  state.status = 'playing';
-  state.lastDrop = performance.now();
-  updateStats();
-  spawnPiece();
+  state.status = 'idle';
+  updateScore();
   hideOverlay();
+  render();
 }
 
 /**
- * 게임 오버 처리를 수행한다.
+ * 게임 시작 버튼 동작.
  */
-function endGame() {
-  state.status = 'gameover';
-  showOverlay('게임 오버', `최종 점수: ${state.score}`, 'restart');
-}
-
-/**
- * 일시정지 상태를 토글한다.
- */
-function togglePause() {
-  if (state.status === 'playing') {
-    state.status = 'paused';
-    startBtn.textContent = '계속하기';
-    showOverlay('일시정지', '계속하려면 버튼을 누르세요', 'start');
-    return;
+function handleStart() {
+  if (state.status === 'gameover') {
+    resetGame();
   }
 
-  if (state.status === 'paused') {
-    state.status = 'playing';
-    state.lastDrop = performance.now();
-    startBtn.textContent = '게임 시작';
-    hideOverlay();
-  }
+  hideOverlay();
+  state.status = 'playing';
+  startDropTimer();
+  render();
 }
 
 /**
@@ -459,16 +482,7 @@ function togglePause() {
  * @param {KeyboardEvent} event - 키보드 이벤트
  */
 function handleKeyDown(event) {
-  if (state.status === 'menu' || state.status === 'gameover') {
-    return;
-  }
-
-  if (event.code === 'KeyP') {
-    togglePause();
-    return;
-  }
-
-  if (state.status !== 'playing') {
+  if (state.status !== 'playing' || !state.current) {
     return;
   }
 
@@ -480,10 +494,7 @@ function handleKeyDown(event) {
       moveHorizontal(1);
       break;
     case 'ArrowDown':
-      if (moveDown()) {
-        state.score += 1;
-        updateStats();
-      }
+      moveDown();
       break;
     case 'ArrowUp':
       rotatePiece();
@@ -498,67 +509,22 @@ function handleKeyDown(event) {
 }
 
 /**
- * 터치 버튼 입력을 처리한다.
- * @param {string} action - 조작 종류
- */
-function handleTouchAction(action) {
-  if (state.status !== 'playing') {
-    return;
-  }
-
-  switch (action) {
-    case 'left':
-      moveHorizontal(-1);
-      break;
-    case 'right':
-      moveHorizontal(1);
-      break;
-    case 'down':
-      if (moveDown()) {
-        state.score += 1;
-        updateStats();
-      }
-      break;
-    case 'rotate':
-      rotatePiece();
-      break;
-    case 'drop':
-      hardDrop();
-      break;
-    default:
-      break;
-  }
-}
-
-/**
  * 이벤트 리스너를 등록한다.
  */
 function bindEvents() {
+  startBtn.addEventListener('click', handleStart);
+  restartBtn.addEventListener('click', resetGame);
   document.addEventListener('keydown', handleKeyDown);
-
-  startBtn.addEventListener('click', () => {
-    if (state.status === 'paused') {
-      togglePause();
-      return;
-    }
-    startGame();
-  });
-
-  restartBtn.addEventListener('click', startGame);
-
-  document.querySelectorAll('.touch-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      handleTouchAction(button.dataset.action);
-    });
-  });
 }
 
 /**
- * 게임을 초기화한다.
+ * 앱을 초기화한다.
  */
 function init() {
+  buildBoardGrid();
+  state.current = createPiece();
   bindEvents();
-  showOverlay('테트리스', '7가지 블록을 쌓고 줄을 없애 보세요!', 'start');
+  updateScore();
   state.animationId = requestAnimationFrame(gameLoop);
 }
 
