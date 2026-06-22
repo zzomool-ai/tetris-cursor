@@ -35,13 +35,14 @@
 ### Bugbot 자동 리뷰
 
 ```
-Bugbot: 실행 완료 — 치명적 결함 없음
+Bugbot: 2건 발견 → 모두 수정 완료
 ```
 
-| Severity | Location | Finding |
-|----------|----------|---------|
-| Low | script.js:89 | canvas context null 미검사 (환경 오류 시 런타임 예외 가능) |
-| Low | index.html:71 | `file://`에서 ES Module 제한 가능 → README에 로컬 서버 안내 추가 |
+| Severity | Location | Finding | 조치 |
+|----------|----------|---------|------|
+| Medium | script.js:339 | 일시정지 시 활성 블록이 캔버스에서 사라짐 | ✅ paused 상태에서도 렌더링 |
+| Medium | script.js:424 | 시작/재개 직후 중력이 즉시 발동 | ✅ lastDrop을 performance.now()로 갱신 |
+| Low | script.js:89 | canvas context null 미검사 | 허용 (데모 범위) |
 
 ---
 
@@ -90,12 +91,13 @@ qa-playtest: 15/15 PASS
 | BH-01 | Low | script.js:441 | `togglePause`에서 overlay 텍스트 이중 설정 | ✅ 수정 완료 |
 | BH-02 | Info | script.js:465 | menu/gameover 중 키 입력 무시 (의도된 동작) | 조치 없음 |
 | BH-03 | Info | — | 7-Bag 랜덤 없음 (완전 랜덤 스폰) | 데모 범위 내 허용 |
-| BH-04 | Info | script.js:282 | hardDrop 중 moveDown이 lock→spawn 연쇄 호출 | 정상 동작 확인 |
+| BH-05 | Medium | script.js:339 | 일시정지 시 활성 블록 미표시 | ✅ 수정 완료 |
+| BH-06 | Medium | script.js:424 | 시작/재개 직후 즉시 낙하 | ✅ 수정 완료 |
 
 ### bug-hunt 종합
 
 ```
-bug-hunt: 치명적 버그 0건, 수정 완료 1건, 허용/정보 3건
+bug-hunt: 치명적 버그 0건, 수정 완료 3건 (BH-01, BH-05, BH-06), 허용/정보 3건
 판정: 배포 가능
 ```
 

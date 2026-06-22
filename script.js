@@ -336,7 +336,7 @@ function drawBoard() {
     }
   }
 
-  if (state.current && state.status === 'playing') {
+  if (state.current && (state.status === 'playing' || state.status === 'paused')) {
     const matrix = getMatrix(state.current);
     for (let row = 0; row < matrix.length; row += 1) {
       for (let col = 0; col < matrix[row].length; col += 1) {
@@ -421,7 +421,7 @@ function startGame() {
   state.level = 1;
   state.lines = 0;
   state.status = 'playing';
-  state.lastDrop = 0;
+  state.lastDrop = performance.now();
   updateStats();
   spawnPiece();
   hideOverlay();
@@ -448,6 +448,7 @@ function togglePause() {
 
   if (state.status === 'paused') {
     state.status = 'playing';
+    state.lastDrop = performance.now();
     startBtn.textContent = '게임 시작';
     hideOverlay();
   }
