@@ -12,7 +12,7 @@
   --muted: #94a3b8;
   --accent: #38bdf8;
   --accent-hover: #0ea5e9;
-  --danger: #f87171;
+  --grid: #1e293b;
   --shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
 }
 
@@ -25,7 +25,7 @@ body {
 }
 
 .app {
-  max-width: 960px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 1.5rem 1rem 2rem;
 }
@@ -47,16 +47,93 @@ body {
 }
 
 .game-layout {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 1.25rem;
-  align-items: start;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.board-section {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.78);
+  border-radius: 12px;
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.overlay-card {
+  text-align: center;
+  padding: 1.25rem;
+  max-width: 240px;
+}
+
+.overlay-card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+.overlay-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.overlay-hint {
+  margin-top: 0.75rem !important;
+  font-size: 0.85rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  grid-template-rows: repeat(20, 1fr);
+  width: 300px;
+  height: 600px;
+  background: #020617;
+  border: 3px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.cell {
+  border: 1px solid #1e293b;
+  background: #0f172a;
+}
+
+.cell--I { background: #22d3ee; }
+.cell--O { background: #facc15; }
+.cell--T { background: #c084fc; }
+.cell--S { background: #4ade80; }
+.cell--Z { background: #f87171; }
+.cell--J { background: #60a5fa; }
+.cell--L { background: #fb923c; }
+
+.cell--piece {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
 }
 
 .panel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  width: min(100%, 220px);
 }
 
 .info-card {
@@ -82,56 +159,13 @@ body {
   color: var(--accent);
 }
 
-.board-section {
-  position: relative;
-}
-
-#game-canvas,
-#next-canvas {
-  display: block;
-  background: #020617;
-  border: 3px solid var(--panel-border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-}
-
-#next-canvas {
-  margin: 0 auto;
-}
-
-.overlay {
-  position: absolute;
-  inset: 0;
+.actions {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(2, 6, 23, 0.78);
-  border-radius: 12px;
-}
-
-.overlay.hidden {
-  display: none;
-}
-
-.overlay-card {
-  text-align: center;
-  padding: 1.5rem;
-  max-width: 260px;
-}
-
-.overlay-card h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.75rem;
-}
-
-.overlay-card p {
-  margin: 0 0 1.25rem;
-  color: var(--muted);
-  line-height: 1.5;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .btn {
-  display: inline-block;
   width: 100%;
   padding: 0.85rem 1rem;
   border: none;
@@ -156,16 +190,13 @@ body {
 }
 
 .btn-secondary {
-  background: var(--danger);
-  color: #fff;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text);
 }
 
 .btn-secondary:hover {
-  background: #ef4444;
-}
-
-.hidden {
-  display: none !important;
+  background: #334155;
 }
 
 .controls-info ul {
@@ -183,6 +214,13 @@ body {
   font-size: 0.9rem;
 }
 
+.controls-info .note {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 kbd {
   display: inline-block;
   min-width: 1.75rem;
@@ -193,57 +231,4 @@ kbd {
   color: var(--text);
   font-size: 0.8rem;
   text-align: center;
-}
-
-.touch-controls {
-  display: none;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.75rem;
-  margin-top: 1.5rem;
-}
-
-.touch-btn {
-  padding: 1rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 1.25rem;
-  cursor: pointer;
-}
-
-.touch-btn:active {
-  background: #334155;
-}
-
-.touch-btn-wide {
-  grid-column: span 3;
-}
-
-@media (max-width: 820px) {
-  .game-layout {
-    grid-template-columns: 1fr;
-    justify-items: center;
-  }
-
-  .panel-left,
-  .panel-right {
-    width: min(100%, 300px);
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .panel-left .info-card,
-  .panel-right .info-card {
-    flex: 1 1 140px;
-  }
-
-  .controls-info {
-    display: none;
-  }
-
-  .touch-controls {
-    display: grid;
-    width: min(100%, 300px);
-  }
 }
